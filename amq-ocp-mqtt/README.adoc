@@ -1,0 +1,152 @@
+= Configure MQTT using AMQ 7 and OCP 3.11
+:toc:
+
+.Note about AMQ 7
+****
+AMQ will be deployed with persistent and SSL support, taking into considerations that Message migration, which is enabled by the use of the scaledown controller, is currently a Technology Preview feature.
+
+For more information, please refer to https://access.redhat.com/documentation/en-us/red_hat_amq/7.2/html-single/deploying_amq_broker_on_openshift_container_platform/#journal-recovery-broker-ocp[amq documentation]
+
+[TIP]
+====
+We need to evaluate the usage of High availabile (HA) Broker by configuring master and slave pairs.
+====
+
+****
+
+
+==  Install all necessary components (templates, images/streams)
+===  Step 1: Install ImageStreams for AMQ Broker in namespace openshift so it is available to any project/namespace in the cluster
+
+
+[source,bash]
+----
+oc login -u admin -p passw0rd
+oc project openshift
+oc replace --force -f https://raw.githubusercontent.com/jboss-container-images/jboss-amq-7-broker-openshift-image/72-1.1.GA/amq-broker-7-image-streams.yaml -n openshift
+oc replace --force -f https://raw.githubusercontent.com/jboss-container-images/jboss-amq-7-broker-openshift-image/72-1.1.GA/amq-broker-7-scaledown-controller-image-streams.yaml -n openshift
+----
+
+===  Step 2: Install AMQ Templates in namespace openshift
+
+[source,bash]
+----
+oc login -u admin -p passw0rd
+for template in amq-broker-72-basic.yaml \
+ amq-broker-72-ssl.yaml \
+ amq-broker-72-custom.yaml \
+ amq-broker-72-persistence.yaml \
+ amq-broker-72-persistence-ssl.yaml;
+ do
+  oc replace --force -f https://raw.githubusercontent.com/jboss-container-images/jboss-amq-7-broker-openshift-image/72-1.1.GA/templates/${template} -n openshift
+  done
+----
+
+* Ensure that previous steps were correct
+** Templates are available
+[source,bash]
+----
+oc get templates -n openshift |grep amq-broker
+----
+
+** The imagestreams are available
+[source,bash]
+----
+oc get is -n openshift |grep amq-broker
+----
+
+== Install Broker in SSL and Persistent Mode
+=== Required Prerequisites
+** Compatible Storage available in the cluster (some storage class created by OCP Admin)
+**  Enough Resources
+**  ROUTER to allow wildcard for subdomains
+
+===  Create a namespace 
+Create new namespace “amq-ocp-mqtt" or if it exists switch to “amq-ocp-mqtt" namespace to host all AMQ7 required objects 
+
+[source,bash]
+----
+oc new-project amq-ocp-mqtt
+----
+
+=== Create certificates for SSL access on AMQ7 Broker
+Create new self-signed certificates with script link:create-ssl-amq.sh[create-ssl-amq.sh] or if you have existing certificates, please use them
+
+[IMPORTANT]
+====
+In the create-ssl-amq.sh, Please change the broker cn to match the same route url that will be generated for the mqtt [underline]#-dname "CN=broker-amq-headless-demo.apps.rahmed.lab.pnq2.cee.redhat.com"# other wise, when client tries to connect it will give server name mismatch
+====
+
+[source,bash]
+----
+sh ./create-ssl-amq.sh
+----
+
+=== Verify a certificate and key matches
+
+[source,bash]
+----
+openssl x509 -noout -modulus -in amq-broker_cert.crt| openssl md5
+openssl rsa -noout -modulus -in amq-broker.key| openssl md5
+
+openssl x509 -noout -modulus -in amq-client_cert.crt| openssl md5
+openssl rsa -noout -modulus -in amq-client.key| openssl md5
+----
+
+=== Create Service Account for the AMQ Broker deployment
+[source,bash]
+----
+echo '{"kind": "ServiceAccount", "apiVersion": "v1", "metadata": {"name": "broker-service-account"}}' | oc create -f -
+----
+
+=== Add the view role to the service account
+The view role enables the service account to view all the resources in the namespace, which is necessary for managing the cluster when using the OpenShift dns-ping protocol for discovering the mesh endpoints.
+[source,bash]
+----
+oc policy add-role-to-user view system:serviceaccount:mqtt:broker-service-account
+----
+
+=== Create a secret to hold  the broker keystore file, and trust store
+[source,bash]
+----
+oc create secret generic amq-app-secret --from-file=./amq-broker.jks
+----
+
+=== Add the secret to the service account created earlier
+[source,bash]
+----
+oc secrets add sa/broker-service-account secret/amq-app-secret
+----
+
+=== Create AMQ7 Broker Application with Stateful Sets utilizing template 
+[source,bash]
+----
+oc new-app --template=amq-broker-72-persistence-ssl \
+    -p=APPLICATION_NAME=broker \
+    -p=AMQ_ROLE=admin \
+    -p=AMQ_NAME=broker \
+    -p=AMQ_SECRET=amq-app-secret \
+    -p=AMQ_TRUSTSTORE=amq-broker.jks \
+    -p=AMQ_KEYSTORE=amq-broker.jks \
+    -p=AMQ_DATA_DIR=/opt/amq/data \
+    -p=AMQ_DATA_DIR_LOGGING="true" \
+    -p=IMAGE=registry.access.redhat.com/amq-broker-7/amq-broker-72-openshift:1.1 \
+    -p=AMQ_PROTOCOL=mqtt \
+    -p=AMQ_QUEUES=demoQueue \
+    -p=AMQ_ADDRESSES=demoTopic \
+    -p=VOLUME_CAPACITY=5Gi \
+    -p=AMQ_USER=amq-demo-user \
+    -p=AMQ_PASSWORD=amqDemoPassword \
+    -p=AMQ_TRUSTSTORE_PASSWORD=passw0rd \
+    -p=AMQ_KEYSTORE_PASSWORD=passw0rd \
+    -n amq-ocp-mqtt
+----
+
+
+=== Verify that pods are running
+[source,bash]
+----
+oc get pods 
+----
+
+
