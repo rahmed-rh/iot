@@ -13,6 +13,9 @@ keytool -import -trustcacerts -noprompt -alias amq-broker -keystore amq-client.j
 keytool -import -trustcacerts -noprompt -alias amq-client -keystore amq-broker.jks -storepass passw0rd -file amq-client_cert.der
 
 
-openssl pkcs12 -in amq-broker.jks -nocerts -nodes  -out amq-broker.key 
-openssl pkcs12 -in amq-client.jks -nocerts -nodes  -out amq-client.key 
+openssl pkcs12 -in amq-broker.jks -nocerts -nodes  -out amq-broker.key -passin pass:passw0rd
+openssl pkcs12 -in amq-client.jks -nocerts -nodes  -out amq-client.key -passin pass:passw0rd
+
+#To convert a JKS (.jks) keystore to a PKCS12 (.p12) keystore
+keytool -importkeystore -srckeystore amq-client.jks -destkeystore amq-client.p12 -srcstoretype JKS -deststoretype PKCS12 -srcstorepass passw0rd -deststorepass passw0rd
 
