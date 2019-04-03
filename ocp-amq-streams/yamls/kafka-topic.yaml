@@ -1,0 +1,20 @@
+apiVersion: kafka.strimzi.io/v1alpha1
+kind: Kafka
+metadata:
+  name: my-cluster
+spec:
+ apiVersion: kafka.strimzi.io/v1alpha1
+kind: KafkaTopic
+metadata:
+  annotations:
+  labels:
+    strimzi.io/cluster: my-cluster
+  name: test-topic
+  namespace: ""
+  resourceVersion: ""
+  selfLink: /apis/kafka.strimzi.io/v1alpha1/namespaces/streams/kafkatopics/test-topic
+  uid: ""
+spec:
+  partitions: 1
+  replicas: 2
+
